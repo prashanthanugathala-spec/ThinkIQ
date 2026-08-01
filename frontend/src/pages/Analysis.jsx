@@ -2,8 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { GlassCard } from '../components/common/GlassCard';
 import { ScoreGauge } from '../components/common/ScoreGauge';
-import { fetchCandidateById, updateCandidateStatus } from '../services/api';
-import { ArrowLeft, CheckCircle2, XCircle, Sparkles, MessageSquare, Columns, Copy, Check } from 'lucide-react';
+import { fetchCandidateById, updateCandidateStatus, sendCandidateEmail } from '../services/api';
+import { ArrowLeft, CheckCircle2, XCircle, Sparkles, MessageSquare, Columns, Copy, Mail, Check } from 'lucide-react';
 
 export const Analysis = () => {
   const { id } = useParams();
@@ -11,6 +11,8 @@ export const Analysis = () => {
   const [loading, setLoading] = useState(true);
   const [copiedIdx, setCopiedIdx] = useState(null);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailSentAlert, setEmailSentAlert] = useState(false);
 
   useEffect(() => {
     if (id) {
@@ -35,6 +37,20 @@ export const Analysis = () => {
       console.error(err);
     } finally {
       setUpdatingStatus(false);
+    }
+  };
+
+  const handleSendEmail = async () => {
+    setEmailSending(true);
+    try {
+      await sendCandidateEmail(candidate.id);
+      setEmailSentAlert(true);
+      setTimeout(() => setEmailSentAlert(false), 4000);
+    } catch (err) {
+      console.error(err);
+      alert("Error triggering email dispatch via Resend API.");
+    } finally {
+      setEmailSending(false);
     }
   };
 
@@ -75,6 +91,16 @@ export const Analysis = () => {
           <span>Back to Candidate Directory</span>
         </Link>
         <div className="flex items-center space-x-3">
+          {/* Send Email Button */}
+          <button
+            onClick={handleSendEmail}
+            disabled={emailSending}
+            className="flex items-center space-x-1.5 px-4 py-2 rounded-full bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold border border-blue-200 transition-colors"
+          >
+            <Mail className="w-3.5 h-3.5" />
+            <span>{emailSending ? 'Sending...' : 'Send Resend Qualification Email'}</span>
+          </button>
+
           <Link
             to={`/compare?candidate_id=${candidate.id}`}
             className="flex items-center space-x-1.5 px-4 py-2 rounded-full bg-white hover:bg-slate-100 text-slate-700 text-xs font-bold border border-slate-200 shadow-sm"
@@ -85,12 +111,34 @@ export const Analysis = () => {
         </div>
       </div>
 
+      {emailSentAlert && (
+        <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+            <span>Qualification email dispatched via Resend API to {candidate.email || 'candidate email address'}!</span>
+          </div>
+        </div>
+      )}
+
       {/* Hero Header Card */}
       <GlassCard glow={true} className="flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="space-y-2 text-center md:text-left">
-          <span className="px-3.5 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
-            {candidate.status}
-          </span>
+          <div className="flex items-center justify-center md:justify-start space-x-3">
+            <span className="px-3.5 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200">
+              {candidate.status}
+            </span>
+            <select
+              value={candidate.status}
+              disabled={updatingStatus}
+              onChange={(e) => handleStatusChange(e.target.value)}
+              className="px-3 py-1 rounded-lg bg-slate-50 border border-slate-200 text-slate-800 text-xs font-bold cursor-pointer"
+            >
+              <option value="Shortlisted">Shortlisted</option>
+              <option value="Analyzed">Analyzed</option>
+              <option value="Pending">Pending</option>
+              <option value="Rejected">Rejected</option>
+            </select>
+          </div>
           <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">{candidate.name}</h1>
           <p className="text-xs text-slate-500 font-medium flex flex-wrap items-center justify-center md:justify-start gap-4">
             <span>Email: {candidate.email || 'N/A'}</span>
@@ -121,18 +169,17 @@ export const Analysis = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Matched Skills */}
         <GlassCard>
-          <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center space-x-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-            <span>Matched Qualifications & Skills</span>
-          </h3>
+          <div className="flex items-center space-x-2 mb-4">
+            <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+            <h3 className="text-sm font-bold text-slate-900">Matched Competencies ({candidate.matched_skills?.length || 0})</h3>
+          </div>
           <div className="flex flex-wrap gap-2">
             {candidate.matched_skills?.map((skill, idx) => (
               <span
                 key={idx}
-                className="px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-800 text-xs font-bold border border-emerald-200 flex items-center space-x-1.5"
+                className="px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold"
               >
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                <span>{skill}</span>
+                ✓ {skill}
               </span>
             ))}
           </div>
@@ -140,87 +187,57 @@ export const Analysis = () => {
 
         {/* Missing Skills */}
         <GlassCard>
-          <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center space-x-2">
-            <XCircle className="w-4 h-4 text-amber-600" />
-            <span>Missing / Unverified Skills</span>
-          </h3>
+          <div className="flex items-center space-x-2 mb-4">
+            <XCircle className="w-5 h-5 text-rose-500" />
+            <h3 className="text-sm font-bold text-slate-900">Missing Competency Gaps ({candidate.missing_skills?.length || 0})</h3>
+          </div>
           <div className="flex flex-wrap gap-2">
             {candidate.missing_skills?.map((skill, idx) => (
               <span
                 key={idx}
-                className="px-3 py-1.5 rounded-lg bg-amber-50 text-amber-800 text-xs font-bold border border-amber-200 flex items-center space-x-1.5"
+                className="px-3 py-1.5 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 text-xs font-bold"
               >
-                <XCircle className="w-3.5 h-3.5 text-amber-600" />
-                <span>{skill}</span>
+                ✕ {skill}
               </span>
             ))}
           </div>
         </GlassCard>
       </div>
 
-      {/* Tailored AI Interview Questions */}
-      <GlassCard>
-        <div className="flex items-center justify-between mb-6">
-          <h3 className="text-base font-bold text-slate-900 flex items-center space-x-2">
-            <MessageSquare className="w-5 h-5 text-blue-600" />
-            <span>Personalized AI Interview Questions</span>
-          </h3>
-          <span className="text-xs text-slate-500 font-medium">Tailored to candidates skill gaps</span>
+      {/* AI Tailored Technical Interview Questions */}
+      <GlassCard className="space-y-6">
+        <div className="flex items-center space-x-3">
+          <div className="p-2 rounded-xl bg-blue-50 text-blue-600">
+            <MessageSquare className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-base font-extrabold text-slate-900">AI Tailored Interview Questions</h3>
+            <p className="text-xs text-slate-500 font-medium">
+              Custom technical questions generated specifically to probe candidate missing skills and verify strengths.
+            </p>
+          </div>
         </div>
 
         <div className="space-y-3">
           {candidate.interview_questions?.map((question, idx) => (
             <div
               key={idx}
-              className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex items-start justify-between gap-4 hover:border-slate-300 transition-colors"
+              className="p-4 rounded-xl bg-slate-50 border border-slate-200 flex items-start justify-between gap-4 hover:border-blue-300 transition-colors"
             >
-              <div className="flex items-start space-x-3 text-xs">
-                <span className="font-bold text-blue-700 bg-blue-100 px-2 py-0.5 rounded-md">
-                  Q{idx + 1}
+              <div className="flex items-start space-x-3">
+                <span className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold text-xs flex items-center justify-center flex-shrink-0 mt-0.5">
+                  {idx + 1}
                 </span>
-                <p className="text-slate-800 leading-relaxed font-semibold">{question}</p>
+                <p className="text-xs text-slate-800 font-semibold leading-relaxed pt-0.5">{question}</p>
               </div>
               <button
                 onClick={() => copyToClipboard(question, idx)}
-                className="p-1.5 rounded-md hover:bg-slate-200 text-slate-500 hover:text-slate-900 transition-colors"
                 title="Copy Question"
+                className="p-2 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-blue-600 hover:bg-blue-50 transition-colors flex-shrink-0"
               >
-                {copiedIdx === idx ? (
-                  <Check className="w-4 h-4 text-emerald-600" />
-                ) : (
-                  <Copy className="w-4 h-4" />
-                )}
+                {copiedIdx === idx ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
               </button>
             </div>
-          ))}
-        </div>
-      </GlassCard>
-
-      {/* Recruiter Decision Bar */}
-      <GlassCard className="flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div>
-          <h4 className="text-xs font-extrabold uppercase text-slate-500 tracking-wider">
-            Recruiter Decision Actions
-          </h4>
-          <p className="text-xs text-slate-600 mt-0.5 font-medium">
-            Changing status automatically dispatches a branded notification email via Resend.
-          </p>
-        </div>
-
-        <div className="flex items-center space-x-2">
-          {['Shortlisted', 'Analyzed', 'Pending', 'Rejected'].map((st) => (
-            <button
-              key={st}
-              disabled={updatingStatus}
-              onClick={() => handleStatusChange(st)}
-              className={`px-4 py-2 rounded-full text-xs font-bold transition-all ${
-                candidate.status === st
-                  ? 'apple-btn-primary shadow-md'
-                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
-              }`}
-            >
-              {st}
-            </button>
           ))}
         </div>
       </GlassCard>

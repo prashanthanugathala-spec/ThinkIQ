@@ -99,6 +99,11 @@ export const updateCandidateStatus = async (candidateId, newStatus) => {
   return res.data;
 };
 
+export const sendCandidateEmail = async (candidateId) => {
+  const res = await api.post(`/candidates/${candidateId}/send-email`);
+  return res.data;
+};
+
 export const deleteCandidate = async (candidateId) => {
   const res = await api.delete(`/candidates/${candidateId}`);
   return res.data;

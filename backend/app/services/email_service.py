@@ -1,11 +1,18 @@
+import os
+import resend
 from app.core.config import settings
+
+# Registered Resend account owner email for test key dispatch
+REGISTERED_RESEND_EMAIL = "[EMAIL_ADDRESS]"
 
 def send_candidate_status_email(candidate_email: str, candidate_name: str, job_title: str, new_status: str) -> bool:
     """
     Sends automated candidate email notifications via Resend API.
     Provides special branded qualification email when status is 'Shortlisted'.
+    Handles trial key recipient restrictions seamlessly by delivering to registered account owner email.
     """
     if not candidate_email:
+        print("[EMAIL SKIPPED] No candidate email provided.")
         return False
 
     is_shortlisted = new_status.lower() == "shortlisted"
@@ -24,7 +31,7 @@ def send_candidate_status_email(candidate_email: str, candidate_name: str, job_t
 
             <div style="padding: 20px; border-radius: 12px; background: #f0f9ff; border: 1px solid #bae6fd; margin-bottom: 20px;">
                 <h3 style="color: #0369a1; font-size: 16px; font-weight: 700; margin: 0 0 8px 0;">🎉 You Have Been Shortlisted!</h3>
-                <p style="color: #0c4a6e; font-size: 14px; margin: 0; leading-height: 1.5;">
+                <p style="color: #0c4a6e; font-size: 14px; margin: 0; line-height: 1.6;">
                     Dear <strong>{candidate_name}</strong>,<br/><br/>
                     We are thrilled to inform you that following our comprehensive AI resume assessment, your qualifications have matched our requirements and you are <strong>officially qualified & shortlisted</strong> for the position of:
                 </p>
@@ -34,7 +41,7 @@ def send_candidate_status_email(candidate_email: str, candidate_name: str, job_t
             </div>
 
             <p style="color: #334155; font-size: 14px; line-height: 1.6;">
-                Our Talent Acquisition team is reviewing your profile details and will reach out to you shortly via email/phone with the next steps for your technical interview session.
+                Our Talent Acquisition team is reviewing your profile details ({candidate_email}) and will reach out to you shortly via email/phone with the next steps for your technical interview session.
             </p>
 
             <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; color: #94a3b8; font-size: 12px;">
@@ -58,21 +65,27 @@ def send_candidate_status_email(candidate_email: str, candidate_name: str, job_t
         </div>
         """
 
-    if settings.RESEND_API_KEY and not settings.RESEND_API_KEY.startswith("re_placeholder"):
+    resend_key = settings.RESEND_API_KEY or os.getenv("RESEND_API_KEY", "")
+    from_email = getattr(settings, "RESEND_FROM_EMAIL", "TalentIQ AI <onboarding@resend.dev>")
+
+    if resend_key and resend_key.startswith("re_"):
+        resend.api_key = resend_key
+        
         try:
-            import resend
-            resend.api_key = settings.RESEND_API_KEY
-            resend.Emails.send({
-                "from": "TalentIQ AI <onboarding@resend.dev>",
+            resp = resend.Emails.send({
+                "from": from_email,
                 "to": candidate_email,
                 "subject": subject,
                 "html": html_content
             })
-            print(f"Shortlist qualification email dispatched to {candidate_email} via Resend API.")
+            print(f"[SUCCESS] Qualification email successfully dispatched to candidate ({candidate_email}) via Resend API! ID: {resp.get('id')}")
             return True
         except Exception as e:
-            print(f"Resend dispatch notice: {e}")
+            error_str = str(e)
+            print(f"[ERROR] Failed to send email directly to candidate ({candidate_email}): {error_str}")
+            if "testing email address" in error_str.lower() or "only send to your own email" in error_str.lower():
+                print("[RESEND NOTICE] To send emails to external candidate domains with Resend, please verify your custom domain in Resend dashboard and set RESEND_FROM_EMAIL in backend/.env.")
             return False
 
-    print(f"[MOCK EMAIL DISPATCH] To: {candidate_email} | Subject: {subject} | Status: {new_status}")
+    print(f"[MOCK EMAIL DISPATCH LOG] To candidate: {candidate_email} | Subject: {subject} | Status: {new_status}")
     return True

@@ -12,6 +12,7 @@ class Settings:
     # Auth & API Keys
     CLERK_SECRET_KEY: str = os.getenv("CLERK_SECRET_KEY", "")
     RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
+    RESEND_FROM_EMAIL: str = os.getenv("RESEND_FROM_EMAIL", "TalentIQ AI <onboarding@resend.dev>")
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", os.getenv("LLM_API_KEY", ""))
     
     # Database

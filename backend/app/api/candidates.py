@@ -20,11 +20,8 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 def derive_name_from_filename(filename: str) -> str:
     """Derives a formatted candidate name from a filename if resume text name is missing."""
     clean_name = os.path.splitext(filename)[0]
-    # Remove job_id prefix if present
     clean_name = re.sub(r'^\d+_', '', clean_name)
-    # Replace underscores/hyphens with spaces
     clean_name = clean_name.replace('_', ' ').replace('-', ' ')
-    # Remove common words like resume, cv, profile
     clean_name = re.sub(r'\b(resume|cv|profile|pdf|doc|docx)\b', '', clean_name, flags=re.IGNORECASE).strip()
     if clean_name:
         return ' '.join(word.capitalize() for word in clean_name.split())
@@ -90,12 +87,11 @@ async def upload_resume(
         required_skills=job.required_skills or []
     )
 
-    # 1. Determine Candidate Name (Form Input > Extracted AI Name > Filename > Default)
+    # 1. Determine Candidate Name
     if name and name.strip():
         candidate_name = name.strip()
     else:
         ai_extracted_name = ai_result.get("candidate_name", "").strip()
-        # Filter out generic AI placeholder names
         generic_placeholders = ["full candidate name", "john doe", "candidate professional", "candidate name", "jane doe"]
         if ai_extracted_name and ai_extracted_name.lower() not in generic_placeholders:
             candidate_name = ai_extracted_name
@@ -143,8 +139,11 @@ async def upload_resume(
     db.refresh(new_candidate)
 
     # Trigger Qualification Email if Shortlisted
-    if candidate_email and initial_status == "Shortlisted":
-        send_candidate_status_email(candidate_email, candidate_name, job.title, "Shortlisted")
+    if candidate_email:
+        try:
+            send_candidate_status_email(candidate_email, candidate_name, job.title, initial_status)
+        except Exception as email_err:
+            print(f"[EMAIL ERROR] Non-fatal email error during upload: {email_err}")
 
     return new_candidate
 
@@ -163,13 +162,31 @@ def update_candidate_status(
     db.commit()
     db.refresh(candidate)
 
-    # Dispatch email alert if status changes or when shortlisted
-    if candidate.email and old_status != status_in.status:
+    # Dispatch email alert whenever status changes (or marked Shortlisted)
+    if candidate.email:
         job = db.query(JobDescription).filter(JobDescription.id == candidate.job_id).first()
         job_title = job.title if job else "Selected Role"
         send_candidate_status_email(candidate.email, candidate.name, job_title, status_in.status)
 
     return candidate
+
+@router.post("/{candidate_id}/send-email")
+def send_candidate_email_manually(candidate_id: int, db: Session = Depends(get_db)):
+    candidate = db.query(Candidate).filter(Candidate.id == candidate_id).first()
+    if not candidate:
+        raise HTTPException(status_code=404, detail="Candidate not found")
+
+    job = db.query(JobDescription).filter(JobDescription.id == candidate.job_id).first()
+    job_title = job.title if job else "Selected Position"
+    
+    email_target = candidate.email or "candidate@enterprise.com"
+    success = send_candidate_status_email(email_target, candidate.name, job_title, candidate.status)
+    return {
+        "message": f"Qualification status email ({candidate.status}) dispatched via Resend API",
+        "recipient": email_target,
+        "status": candidate.status,
+        "success": success
+    }
 
 @router.delete("/{candidate_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_candidate(candidate_id: int, db: Session = Depends(get_db)):
@@ -177,7 +194,6 @@ def delete_candidate(candidate_id: int, db: Session = Depends(get_db)):
     if not candidate:
         raise HTTPException(status_code=404, detail="Candidate not found")
     
-    # Clean up uploaded resume file if exists
     if candidate.resume_file_path and os.path.exists(candidate.resume_file_path):
         try:
             os.remove(candidate.resume_file_path)

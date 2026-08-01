@@ -95,7 +95,8 @@ export const UploadResume = () => {
       clearInterval(stepInterval);
       setIsProcessing(false);
       console.error(err);
-      setErrorMsg("Error executing AI resume parsing. Please check file format and try again.");
+      const message = err.response?.data?.detail || "Error executing AI resume parsing. Please check file format and try again.";
+      setErrorMsg(message);
     }
   };
 

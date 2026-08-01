@@ -1,5 +1,6 @@
 import os
 import shutil
+import re
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Header, status
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -15,6 +16,19 @@ router = APIRouter(prefix="/candidates", tags=["Candidates"])
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+def derive_name_from_filename(filename: str) -> str:
+    """Derives a formatted candidate name from a filename if resume text name is missing."""
+    clean_name = os.path.splitext(filename)[0]
+    # Remove job_id prefix if present
+    clean_name = re.sub(r'^\d+_', '', clean_name)
+    # Replace underscores/hyphens with spaces
+    clean_name = clean_name.replace('_', ' ').replace('-', ' ')
+    # Remove common words like resume, cv, profile
+    clean_name = re.sub(r'\b(resume|cv|profile|pdf|doc|docx)\b', '', clean_name, flags=re.IGNORECASE).strip()
+    if clean_name:
+        return ' '.join(word.capitalize() for word in clean_name.split())
+    return "Candidate Professional"
 
 @router.get("/", response_model=List[CandidateResponse])
 def get_candidates(
@@ -76,10 +90,34 @@ async def upload_resume(
         required_skills=job.required_skills or []
     )
 
-    candidate_name = name or ai_result.get("candidate_name", "Candidate Professional")
-    candidate_email = email or ai_result.get("email", "candidate@example.com")
+    # 1. Determine Candidate Name (Form Input > Extracted AI Name > Filename > Default)
+    if name and name.strip():
+        candidate_name = name.strip()
+    else:
+        ai_extracted_name = ai_result.get("candidate_name", "").strip()
+        # Filter out generic AI placeholder names
+        generic_placeholders = ["full candidate name", "john doe", "candidate professional", "candidate name", "jane doe"]
+        if ai_extracted_name and ai_extracted_name.lower() not in generic_placeholders:
+            candidate_name = ai_extracted_name
+        else:
+            candidate_name = derive_name_from_filename(file.filename)
+
+    # 2. Determine Candidate Email
+    if email and email.strip():
+        candidate_email = email.strip()
+    else:
+        ai_extracted_email = ai_result.get("email", "").strip()
+        if ai_extracted_email and "example.com" not in ai_extracted_email.lower():
+            candidate_email = ai_extracted_email
+        else:
+            candidate_email = "candidate@enterprise.com"
+
     candidate_phone = ai_result.get("phone", "+1 (555) 000-0000")
     match_score = float(ai_result.get("match_score", 75.0))
+
+    # Sync candidate name and email back into ai_result dictionary
+    ai_result["candidate_name"] = candidate_name
+    ai_result["email"] = candidate_email
 
     # Auto-Shortlist if match score >= 85%
     initial_status = "Shortlisted" if match_score >= 85.0 else "Analyzed"

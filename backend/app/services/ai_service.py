@@ -5,6 +5,17 @@ import requests
 from typing import Dict, Any, List
 from app.core.config import settings
 
+def extract_name_from_text(text: str) -> str:
+    """Extracts candidate full name from text lines if available."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in lines[:10]:
+        # Match lines with 2 to 4 capitalized words (e.g., Kunall Prashanth, Sarah Jane Chen)
+        if re.match(r'^[A-Z][a-zA-Z\.\'\-]+\s+(?:[A-Z][a-zA-Z\.\'\-]+\s*){1,3}$', line):
+            # Exclude common headers
+            if not any(header in line.lower() for header in ["curriculum", "resume", "profile", "contact", "education", "experience"]):
+                return line
+    return ""
+
 def analyze_resume_against_job(resume_text: str, job_title: str, job_description: str, required_skills: List[str]) -> Dict[str, Any]:
     """
     Analyzes candidate resume against job requirements.
@@ -14,6 +25,11 @@ def analyze_resume_against_job(resume_text: str, job_title: str, job_description
     3. Intelligent Rule-Based Fallback Engine
     """
     api_key = settings.GEMINI_API_KEY or os.getenv("LLM_API_KEY", "")
+
+    # Pre-extract name and email from text
+    extracted_text_name = extract_name_from_text(resume_text)
+    email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', resume_text)
+    extracted_text_email = email_match.group(0) if email_match else ""
 
     prompt = f"""
 You are an expert AI Talent Acquisition specialist evaluating candidate suitability for the position: "{job_title}".
@@ -29,8 +45,8 @@ CANDIDATE RESUME TEXT:
 
 Analyze the resume and return strictly a valid JSON object matching this exact structure:
 {{
-  "candidate_name": "Full Candidate Name",
-  "email": "candidate@example.com",
+  "candidate_name": "{extracted_text_name if extracted_text_name else 'Extract Actual Name from Resume Text'}",
+  "email": "{extracted_text_email if extracted_text_email else 'candidate@example.com'}",
   "phone": "+1 (555) 000-0000",
   "match_score": 88.5,
   "matched_skills": ["Skill1", "Skill2"],
@@ -44,7 +60,8 @@ Analyze the resume and return strictly a valid JSON object matching this exact s
     "Role specific question for {job_title}"
   ]
 }}
-DO NOT wrap in markdown formatting. Return raw JSON text only.
+IMPORTANT: Extract the candidate's ACTUAL full name from the resume text. Do NOT use generic placeholders like 'John Doe' or 'Full Candidate Name'.
+Return raw JSON text only.
 """
 
     # 1. Groq / xAI LLM API Key (keys starting with 'gsk_')
@@ -58,10 +75,10 @@ DO NOT wrap in markdown formatting. Return raw JSON text only.
             payload = {
                 "model": "llama-3.3-70b-versatile",
                 "messages": [
-                    {"role": "system", "content": "You are a professional HR AI assistant that outputs raw JSON."},
+                    {"role": "system", "content": "You are a professional HR AI assistant that outputs raw JSON with actual candidate names."},
                     {"role": "user", "content": prompt}
                 ],
-                "temperature": 0.2,
+                "temperature": 0.1,
                 "response_format": {"type": "json_object"}
             }
             res = requests.post(url, headers=headers, json=payload, timeout=20)
@@ -69,7 +86,9 @@ DO NOT wrap in markdown formatting. Return raw JSON text only.
                 content = res.json()["choices"][0]["message"]["content"]
                 clean_json = content.replace("```json", "").replace("```", "").strip()
                 result = json.loads(clean_json)
-                print(f"Successfully evaluated resume with Groq/xAI LLM key (Score: {result.get('match_score')}%)")
+                if extracted_text_name and (not result.get("candidate_name") or result.get("candidate_name").lower() in ["john doe", "full candidate name"]):
+                    result["candidate_name"] = extracted_text_name
+                print(f"Successfully evaluated resume with Groq/xAI LLM key (Name: {result.get('candidate_name')}, Score: {result.get('match_score')}%)")
                 return result
             else:
                 print(f"Groq API status {res.status_code}: {res.text}")
@@ -85,23 +104,18 @@ DO NOT wrap in markdown formatting. Return raw JSON text only.
             response = model.generate_content(prompt)
             clean_json = response.text.replace("```json", "").replace("```", "").strip()
             result = json.loads(clean_json)
-            print(f"Successfully evaluated resume with Gemini API (Score: {result.get('match_score')}%)")
+            if extracted_text_name and (not result.get("candidate_name") or result.get("candidate_name").lower() in ["john doe", "full candidate name"]):
+                result["candidate_name"] = extracted_text_name
+            print(f"Successfully evaluated resume with Gemini API (Name: {result.get('candidate_name')}, Score: {result.get('match_score')}%)")
             return result
         except Exception as e:
             print(f"Gemini API call warning: {e}")
 
     # 3. Intelligent Rule-Based Fallback Matching Algorithm
     resume_lower = resume_text.lower()
+    candidate_name = extracted_text_name if extracted_text_name else "Candidate Professional"
+    candidate_email = extracted_text_email if extracted_text_email else "candidate@example.com"
     
-    # Extract candidate name if present
-    name_match = re.search(r'([A-Z][a-z]+\s+[A-Z][a-z]+)', resume_text[:200])
-    candidate_name = name_match.group(1) if name_match else "Candidate Professional"
-    
-    # Extract email
-    email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', resume_text)
-    candidate_email = email_match.group(0) if email_match else "candidate@example.com"
-    
-    # Check skills matched vs missing
     matched = []
     missing = []
     for skill in required_skills:
